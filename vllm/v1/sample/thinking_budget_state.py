@@ -225,6 +225,7 @@ class ThinkingBudgetStateHolder:
             "bonus_token_forced": False,
             "continue_thinking": continue_thinking,
             "scan_offset": 0,
+            "marker_check_pos": 0,
         }
 
     def _update_think_state(self, state: dict[str, Any]) -> None:
@@ -236,18 +237,28 @@ class ThinkingBudgetStateHolder:
             state["force_index"] = []
             return
 
-        if state["start_thinking"] == -1:
-            scan_offset = state.get("scan_offset", 0)
-            output_slice = state.get("output_tok_ids", [])[scan_offset:]
+        output_tok_ids = state.get("output_tok_ids", [])
+        scan_offset = state.get("scan_offset", 0)
+        marker_check_pos = state.get("marker_check_pos", 0)
+        new_generated_tokens = output_tok_ids[marker_check_pos:]
+        state["marker_check_pos"] = len(output_tok_ids)
+        if (
+            state["start_thinking"] == -1
+            and self.think_start_token_ids
+            and self.think_start_token_ids[-1] in new_generated_tokens
+        ):
+            output_slice = output_tok_ids[scan_offset:]
             start_thinking = self._find_last_sequence_index(
                 output_slice, self.think_start_token_ids
             )
             if start_thinking >= 0:
                 start_thinking += scan_offset
             state["start_thinking"] = start_thinking
-        if state["end_thinking"] == -1:
-            scan_offset = state.get("scan_offset", 0)
-            output_slice = state.get("output_tok_ids", [])[scan_offset:]
+        if (
+            state["end_thinking"] == -1
+            and self.think_end_token_ids[-1] in new_generated_tokens
+        ):
+            output_slice = output_tok_ids[scan_offset:]
             end_thinking = self._find_last_sequence_index(
                 output_slice, self.think_end_token_ids
             )

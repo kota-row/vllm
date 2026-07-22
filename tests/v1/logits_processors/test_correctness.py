@@ -1269,6 +1269,50 @@ def test_thinking_budget_long_thinking_section_end_marker_found_at_correct_index
     )
 
 
+def test_thinking_budget_marker_search_uses_new_token_quick_check(monkeypatch):
+    class MultiTokenEndReasoningConfig:
+        reasoning_start_token_ids = [THINK_START_TOKEN_ID]
+        reasoning_end_token_ids = [700, 701, THINK_END_TOKEN_ID]
+        enabled = True
+
+    h = ThinkingBudgetStateHolder(
+        MultiTokenEndReasoningConfig(), 8, 0, torch.device("cpu"), False
+    )
+    h.sync_batch(
+        BatchUpdate(
+            batch_size=1,
+            removed=(),
+            added=[(0, SamplingParams(thinking_token_budget=10_000), None, [])],
+            moved=(),
+        )
+    )
+
+    searched_markers: list[list[int]] = []
+    original_find = h._find_last_sequence_index
+
+    def find_sequence(target_list, token_ids):
+        searched_markers.append(token_ids)
+        return original_find(target_list, token_ids)
+
+    monkeypatch.setattr(h, "_find_last_sequence_index", find_sequence)
+
+    out = [THINK_START_TOKEN_ID]
+    h.update_state([out], None, None)
+    for _ in range(500):
+        out.append(600)
+        h.update_state([out], None, None)
+    out.extend(MultiTokenEndReasoningConfig.reasoning_end_token_ids[:-1])
+    h.update_state([out], None, None)
+    out.extend([MultiTokenEndReasoningConfig.reasoning_end_token_ids[-1], 601])
+    h.update_state([out], None, None)
+
+    assert searched_markers == [
+        MultiTokenEndReasoningConfig.reasoning_start_token_ids,
+        MultiTokenEndReasoningConfig.reasoning_end_token_ids,
+    ]
+    assert not h._state[0]["in_think"]
+
+
 # --- Thinking budget re-entry tests (issue #43708) ---
 # Regression tests: after budget forces end-of-thinking token sequence,
 # the state machine must detect and enforce budget on subsequent blocks.
